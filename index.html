@@ -168,10 +168,16 @@
 
       // Resize handling
       function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        state.width = canvas.width;
-        state.height = canvas.height;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = window.innerWidth * dpr;
+        canvas.height = window.innerHeight * dpr;
+        canvas.style.width = window.innerWidth + "px";
+        canvas.style.height = window.innerHeight + "px";
+
+        ctx.scale(dpr, dpr);
+
+        state.width = window.innerWidth;
+        state.height = window.innerHeight;
       }
       window.addEventListener("resize", resize);
       resize();
@@ -303,7 +309,7 @@
       class Fruit {
         constructor(type, speedMultiplier) {
           this.type = type; // 'good' or 'bad'
-          this.radius = 20;
+          this.radius = 25;
           this.x =
             Math.random() * (state.width - this.radius * 2) + this.radius;
           this.y = -this.radius * 2;
@@ -336,15 +342,20 @@
           ctx.save();
           ctx.translate(this.x, this.y);
           ctx.rotate(this.rotation);
-          ctx.font = "30px Arial";
+
+          ctx.font =
+            '40px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(this.emoji, 0, 0);
 
-          // Debug circle
-          // ctx.beginPath();
-          // ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
-          // ctx.stroke();
+          // White outline for high contrast
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineJoin = "round";
+          ctx.strokeText(this.emoji, 0, 0);
+
+          // Main emoji
+          ctx.fillText(this.emoji, 0, 0);
 
           ctx.restore();
         }
