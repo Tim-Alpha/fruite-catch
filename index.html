@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Fruit Catch</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        touch-action: none; /* Prevent pull-to-refresh on mobile */
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      }
+      canvas {
+        display: block;
+      }
+      /* Shake animation for bad hits */
+      @keyframes shake {
+        0% {
+          transform: translate(1px, 1px) rotate(0deg);
+        }
+        10% {
+          transform: translate(-1px, -2px) rotate(-1deg);
+        }
+        20% {
+          transform: translate(-3px, 0px) rotate(1deg);
+        }
+        30% {
+          transform: translate(3px, 2px) rotate(0deg);
+        }
+        40% {
+          transform: translate(1px, -1px) rotate(1deg);
+        }
+        50% {
+          transform: translate(-1px, 2px) rotate(-1deg);
+        }
+        60% {
+          transform: translate(-3px, 1px) rotate(0deg);
+        }
+        70% {
+          transform: translate(3px, 1px) rotate(-1deg);
+        }
+        80% {
+          transform: translate(-1px, -1px) rotate(1deg);
+        }
+        90% {
+          transform: translate(1px, 2px) rotate(0deg);
+        }
+        100% {
+          transform: translate(1px, -2px) rotate(-1deg);
+        }
+      }
+      .shake {
+        animation: shake 0.5s;
+        animation-iteration-count: 1;
+      }
+    </style>
+  </head>
+  <body class="bg-slate-900 text-white select-none">
+    <!-- UI Overlay -->
+    <div
+      id="ui-layer"
+      class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 z-10"
+    >
+      <!-- Top Bar -->
+      <div class="flex justify-between items-start">
+        <div>
+          <div
+            class="text-4xl font-bold text-yellow-400 drop-shadow-md"
+            id="score"
+          >
+            0
+          </div>
+          <div class="text-sm text-slate-400 uppercase tracking-wider">
+            Score
+          </div>
+        </div>
+
+        <div class="flex flex-col items-center">
+          <div
+            class="text-2xl font-bold text-purple-400 drop-shadow-md"
+            id="streak"
+          >
+            x1
+          </div>
+          <div class="w-32 h-2 bg-slate-700 rounded-full mt-1 overflow-hidden">
+            <div
+              id="streak-bar"
+              class="h-full bg-purple-500 w-0 transition-all duration-300"
+            ></div>
+          </div>
+        </div>
+
+        <div class="text-right">
+          <div class="text-3xl" id="lives">❤️❤️❤️</div>
+          <div class="text-sm text-slate-400 uppercase tracking-wider">
+            Lives
+          </div>
+        </div>
+      </div>
+
+      <!-- Start Screen -->
+      <div
+        id="start-screen"
+        class="absolute inset-0 flex flex-col items-center justify-center bg-black/70 pointer-events-auto backdrop-blur-sm transition-opacity duration-300"
+      >
+        <h1
+          class="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-red-500 mb-4 drop-shadow-lg"
+        >
+          Fruit Catch
+        </h1>
+        <p class="text-xl text-slate-300 mb-8">
+          Catch the <span class="text-green-400">Good</span> fruits. Avoid the
+          <span class="text-red-400">Bad</span> ones.
+        </p>
+        <button
+          id="start-btn"
+          class="px-8 py-4 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full text-2xl font-bold shadow-lg hover:scale-105 transition-transform active:scale-95"
+        >
+          Play Now 🍎
+        </button>
+        <p class="mt-4 text-sm text-slate-500">
+          Use Arrow Keys / A-D or Drag to move
+        </p>
+      </div>
+
+      <!-- Game Over Screen -->
+      <div
+        id="game-over-screen"
+        class="hidden absolute inset-0 flex flex-col items-center justify-center bg-black/80 pointer-events-auto backdrop-blur-md"
+      >
+        <h2 class="text-5xl font-bold text-white mb-2">Game Over</h2>
+        <div class="text-2xl text-yellow-400 mb-6">
+          Final Score: <span id="final-score">0</span>
+        </div>
+        <button
+          id="restart-btn"
+          class="px-8 py-3 bg-white text-slate-900 rounded-full text-xl font-bold shadow-lg hover:bg-slate-200 transition-colors"
+        >
+          Try Again ↺
+        </button>
+      </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+      // --- Game Constants & State ---
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+
+      // Game State
+      let state = {
+        isPlaying: false,
+        score: 0,
+        lives: 3,
+        streak: 0,
+        streakMultiplier: 1,
+        gameTime: 0,
+        lastTime: 0,
+        width: 0,
+        height: 0,
+      };
+
+      // Resize handling
+      function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        state.width = canvas.width;
+        state.height = canvas.height;
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      // --- Main Game Loop Skeleton ---
+      function loop(timestamp) {
+        if (!state.lastTime) state.lastTime = timestamp;
+        const dt = (timestamp - state.lastTime) / 1000;
+        state.lastTime = timestamp;
+
+        if (state.isPlaying) {
+          update(dt);
+          draw();
+        }
+
+        requestAnimationFrame(loop);
+      }
+
+      // --- Input Handling ---
+      const input = {
+        left: false,
+        right: false,
+        x: null, // For touch/mouse drag
+      };
+
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A")
+          input.left = true;
+        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D")
+          input.right = true;
+      });
+
+      window.addEventListener("keyup", (e) => {
+        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A")
+          input.left = false;
+        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D")
+          input.right = false;
+      });
+
+      // Touch/Mouse Drag
+      function handleMove(clientX) {
+        if (!state.isPlaying) return;
+        input.x = clientX;
+      }
+
+      window.addEventListener("mousemove", (e) => {
+        if (e.buttons === 1) handleMove(e.clientX); // Only drag if clicked
+      });
+      window.addEventListener(
+        "touchmove",
+        (e) => {
+          e.preventDefault(); // Prevent scrolling
+          handleMove(e.touches[0].clientX);
+        },
+        { passive: false }
+      );
+
+      window.addEventListener("touchstart", (e) => {
+        handleMove(e.touches[0].clientX);
+      });
+
+      window.addEventListener("touchend", () => {
+        input.x = null;
+      });
+      window.addEventListener("mouseup", () => {
+        input.x = null;
+      });
+
+      // --- Entities ---
+      class Player {
+        constructor() {
+          this.width = 100;
+          this.height = 60;
+          this.x = state.width / 2 - this.width / 2;
+          this.y = state.height - this.height - 20;
+          this.speed = 600; // pixels per second
+          this.color = "#f59e0b"; // amber-500
+        }
+
+        update(dt) {
+          // Keyboard Movement
+          if (input.left) this.x -= this.speed * dt;
+          if (input.right) this.x += this.speed * dt;
+
+          // Mouse/Touch Follow (Direct positioning with lerp for smoothness)
+          if (input.x !== null) {
+            const targetX = input.x - this.width / 2;
+            // Simple lerp for smooth drag following
+            this.x += (targetX - this.x) * 15 * dt;
+          }
+
+          // Boundaries
+          if (this.x < 0) this.x = 0;
+          if (this.x + this.width > state.width)
+            this.x = state.width - this.width;
+
+          // Update Y position in case of resize
+          this.y = state.height - this.height - 20;
+        }
+
+        draw(ctx) {
+          // Basket Body (Trapezoid shape)
+          ctx.fillStyle = this.color;
+          ctx.beginPath();
+          ctx.moveTo(this.x, this.y);
+          ctx.lineTo(this.x + this.width, this.y);
+          ctx.lineTo(this.x + this.width - 15, this.y + this.height);
+          ctx.lineTo(this.x + 15, this.y + this.height);
+          ctx.closePath();
+          ctx.fill();
+
+          // Basket Rim
+          ctx.fillStyle = "#d97706"; // amber-600
+          ctx.fillRect(this.x - 5, this.y, this.width + 10, 10);
+
+          // Weave pattern details (optional polish)
+          ctx.fillStyle = "rgba(0,0,0,0.1)";
+          for (let i = 1; i < 4; i++) {
+            ctx.fillRect(
+              this.x + 10,
+              this.y + (this.height / 4) * i,
+              this.width - 20,
+              2
+            );
+          }
+        }
+      }
+
+      class Fruit {
+        constructor(type, speedMultiplier) {
+          this.type = type; // 'good' or 'bad'
+          this.radius = 20;
+          this.x =
+            Math.random() * (state.width - this.radius * 2) + this.radius;
+          this.y = -this.radius * 2;
+          this.speed = (200 + Math.random() * 100) * speedMultiplier;
+          this.rotation = 0;
+          this.rotSpeed = (Math.random() - 0.5) * 4;
+          this.markedForDeletion = false;
+
+          // Visuals
+          this.emoji =
+            type === "good"
+              ? ["🍎", "🍌", "🍇", "🍊", "🍓"][Math.floor(Math.random() * 5)]
+              : ["💣", "🧨", "🥀", "🪨"][Math.floor(Math.random() * 4)];
+        }
+
+        update(dt) {
+          this.y += this.speed * dt;
+          this.rotation += this.rotSpeed * dt;
+
+          if (this.y > state.height + 50) {
+            this.markedForDeletion = true;
+            if (this.type === "good") {
+              // Missed good fruit logic
+              handleMiss();
+            }
+          }
+        }
+
+        draw(ctx) {
+          ctx.save();
+          ctx.translate(this.x, this.y);
+          ctx.rotate(this.rotation);
+          ctx.font = "30px Arial";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(this.emoji, 0, 0);
+
+          // Debug circle
+          // ctx.beginPath();
+          // ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+          // ctx.stroke();
+
+          ctx.restore();
+        }
+      }
+
+      let player;
+      let fruits = [];
+      let spawnTimer = 0;
+      let spawnInterval = 1.5;
+
+      function checkCollisions() {
+        for (let fruit of fruits) {
+          if (fruit.markedForDeletion) continue;
+
+          // Simple Circle-Rectangle Collision
+          // Find closest point on rectangle to circle center
+          let testX = fruit.x;
+          let testY = fruit.y;
+
+          if (fruit.x < player.x) testX = player.x;
+          else if (fruit.x > player.x + player.width)
+            testX = player.x + player.width;
+
+          if (fruit.y < player.y) testY = player.y;
+          else if (fruit.y > player.y + player.height)
+            testY = player.y + player.height;
+
+          let distX = fruit.x - testX;
+          let distY = fruit.y - testY;
+          let distance = Math.sqrt(distX * distX + distY * distY);
+
+          if (distance <= fruit.radius) {
+            fruit.markedForDeletion = true;
+            handleCatch(fruit);
+          }
+        }
+      }
+
+      // --- Audio System ---
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      const sounds = {
+        catch: (streak) => {
+          if (audioCtx.state === "suspended") audioCtx.resume();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+
+          osc.type = "sine";
+          // Pitch goes up with streak
+          osc.frequency.setValueAtTime(400 + streak * 50, audioCtx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(
+            800 + streak * 50,
+            audioCtx.currentTime + 0.1
+          );
+
+          gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(
+            0.01,
+            audioCtx.currentTime + 0.1
+          );
+
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.1);
+        },
+        bad: () => {
+          if (audioCtx.state === "suspended") audioCtx.resume();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+
+          osc.type = "sawtooth";
+          osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+          osc.frequency.linearRampToValueAtTime(50, audioCtx.currentTime + 0.3);
+
+          gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(
+            0.01,
+            audioCtx.currentTime + 0.3
+          );
+
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.3);
+        },
+        miss: () => {
+          if (audioCtx.state === "suspended") audioCtx.resume();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+          osc.frequency.linearRampToValueAtTime(
+            200,
+            audioCtx.currentTime + 0.2
+          );
+
+          gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(
+            0.01,
+            audioCtx.currentTime + 0.2
+          );
+
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.2);
+        },
+      };
+
+      // --- Particle System ---
+      class Particle {
+        constructor(x, y, color) {
+          this.x = x;
+          this.y = y;
+          this.color = color;
+          this.size = Math.random() * 5 + 2;
+          this.speedX = (Math.random() - 0.5) * 10;
+          this.speedY = (Math.random() - 0.5) * 10;
+          this.life = 1.0;
+          this.decay = Math.random() * 0.03 + 0.02;
+        }
+
+        update() {
+          this.x += this.speedX;
+          this.y += this.speedY;
+          this.life -= this.decay;
+          this.size *= 0.95;
+        }
+
+        draw(ctx) {
+          ctx.globalAlpha = this.life;
+          ctx.fillStyle = this.color;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1.0;
+        }
+      }
+
+      let particles = [];
+
+      function spawnParticles(x, y, color, count = 10) {
+        for (let i = 0; i < count; i++) {
+          particles.push(new Particle(x, y, color));
+        }
+      }
+
+      function handleCatch(fruit) {
+        if (fruit.type === "good") {
+          state.streak++;
+          updateStreak();
+          let points = 10 * state.streakMultiplier;
+          state.score += points;
+          sounds.catch(state.streakMultiplier);
+          spawnParticles(fruit.x, fruit.y, "#fbbf24", 15); // Yellow particles
+
+          // Floating text (simple implementation via particles or separate entity? Let's use particles for now or just UI update)
+        } else {
+          state.lives--;
+          state.streak = 0;
+          updateStreak();
+          document.body.classList.add("shake");
+          setTimeout(() => document.body.classList.remove("shake"), 500);
+          sounds.bad();
+          spawnParticles(fruit.x, fruit.y, "#ef4444", 20); // Red particles
+        }
+        updateUI();
+        checkGameOver();
+      }
+
+      function handleMiss() {
+        state.streak = 0;
+        updateStreak();
+        state.lives--;
+        updateUI();
+        checkGameOver();
+        sounds.miss();
+      }
+
+      function updateStreak() {
+        if (state.streak < 5) state.streakMultiplier = 1;
+        else if (state.streak < 10) state.streakMultiplier = 2;
+        else if (state.streak < 20) state.streakMultiplier = 3;
+        else state.streakMultiplier = 4;
+      }
+
+      function updateUI() {
+        document.getElementById("score").innerText = state.score;
+        document.getElementById("lives").innerText = "❤️".repeat(
+          Math.max(0, state.lives)
+        );
+        document.getElementById("streak").innerText =
+          "x" + state.streakMultiplier;
+
+        // Streak bar width
+        let percentage = Math.min(100, (state.streak / 20) * 100);
+        document.getElementById("streak-bar").style.width = percentage + "%";
+      }
+
+      function checkGameOver() {
+        if (state.lives <= 0) {
+          state.isPlaying = false;
+          document.getElementById("final-score").innerText = state.score;
+          gameOverScreen.classList.remove("hidden");
+        }
+      }
+
+      function update(dt) {
+        state.gameTime += dt;
+
+        // Difficulty Scaling
+        // Speed increases with time
+        let speedMultiplier = 1 + state.gameTime / 60;
+        // Spawn rate increases
+        spawnInterval = Math.max(0.4, 1.5 - state.gameTime / 40);
+
+        // Spawning
+        spawnTimer += dt;
+        if (spawnTimer > spawnInterval) {
+          spawnTimer = 0;
+          let isBad = Math.random() < Math.min(0.3, 0.1 + state.gameTime / 100); // Cap bad items at 30%
+          fruits.push(new Fruit(isBad ? "bad" : "good", speedMultiplier));
+        }
+
+        if (player) player.update(dt);
+
+        fruits.forEach((f) => f.update(dt));
+
+        // Update particles
+        particles.forEach((p) => p.update());
+        particles = particles.filter((p) => p.life > 0);
+
+        checkCollisions();
+
+        // Cleanup
+        fruits = fruits.filter((f) => !f.markedForDeletion);
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, state.width, state.height);
+
+        // Background Gradient
+        const gradient = ctx.createLinearGradient(0, 0, 0, state.height);
+        gradient.addColorStop(0, "#0f172a"); // slate-900
+        gradient.addColorStop(1, "#1e293b"); // slate-800
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, state.width, state.height);
+
+        if (player) player.draw(ctx);
+        fruits.forEach((f) => f.draw(ctx));
+        particles.forEach((p) => p.draw(ctx));
+      }
+
+      // --- UI & Controls ---
+      const startScreen = document.getElementById("start-screen");
+      const gameOverScreen = document.getElementById("game-over-screen");
+      const startBtn = document.getElementById("start-btn");
+      const restartBtn = document.getElementById("restart-btn");
+
+      function startGame() {
+        state.isPlaying = true;
+        state.score = 0;
+        state.lives = 3;
+        state.streak = 0;
+        state.gameTime = 0;
+        state.lastTime = 0;
+
+        startScreen.classList.add("hidden");
+        gameOverScreen.classList.add("hidden");
+
+        player = new Player();
+        fruits = [];
+        particles = [];
+        spawnTimer = 0;
+        updateUI();
+      }
+
+      startBtn.addEventListener("click", startGame);
+      restartBtn.addEventListener("click", startGame);
+
+      // Start loop
+      requestAnimationFrame(loop);
+    </script>
+  </body>
+</html>
